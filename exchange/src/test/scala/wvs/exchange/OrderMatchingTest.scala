@@ -38,11 +38,11 @@ class OrderMatchingTest extends WordSpec with Matchers with BeforeAndAfterEach w
   "OrderMatchingTest" should {
 
     "main test" in {
-      /*service.start().futureValue
+      service.start().futureValue
 
       val url = resultUrl()
       Source.fromURL(url).getLines.nonEmpty shouldBe true
-      "/result/test1.txt".content shouldBe Source.fromURL(url).mkString*/
+      "/result/test1.txt".content shouldBe Source.fromURL(url).mkString
 
       testModule = new Test2Module()
 

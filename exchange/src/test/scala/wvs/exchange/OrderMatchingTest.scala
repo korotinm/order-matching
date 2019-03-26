@@ -104,6 +104,17 @@ class OrderMatchingTest extends WordSpec with Matchers with BeforeAndAfterEach w
       Source.fromURL(url).getLines.nonEmpty shouldBe true
       "/result/test6.txt".content shouldBe Source.fromURL(url).mkString
 
+      testModule = new Test7Module()
+
+      succeed
+    }
+
+    "partial matching of orders" in {
+      service.start().futureValue
+
+      val url = resultUrl()
+      Source.fromURL(url).getLines.nonEmpty shouldBe true
+      "/result/test7.txt".content shouldBe Source.fromURL(url).mkString
     }
   }
 
@@ -162,6 +173,15 @@ class OrderMatchingTest extends WordSpec with Matchers with BeforeAndAfterEach w
       bind[String]
         .annotatedWith(Names.named("directory"))
         .toInstance(s"${File.separator}test6")
+    }
+  }
+
+  class Test7Module() extends AbstractModule with ScalaModule {
+    override def configure(): Unit = {
+      bind[LoaderService].asEagerSingleton()
+      bind[String]
+        .annotatedWith(Names.named("directory"))
+        .toInstance(s"${File.separator}test7")
     }
   }
 

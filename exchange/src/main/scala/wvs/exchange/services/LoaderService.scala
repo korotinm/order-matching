@@ -9,6 +9,10 @@ import wvs.exchange.services.actors.{ClientHolderActor, OrderHolderActor}
 
 import scala.concurrent.Future
 
+/**
+  *
+  * This is ugly class just for loading data
+  */
 @Singleton
 class LoaderService @Inject()(reader: ResourceReader,
                               clientT: ClientT,
@@ -16,6 +20,8 @@ class LoaderService @Inject()(reader: ResourceReader,
                               @Named("directory") dir: String) {
 
   def start(): Future[Terminated] = {
+    // yes, using 'var' is terrible approach but the task was done for fun
+    // and I don't care as it's not prod. version
     var clientMap = Map.empty[ClientId, ClientModel]
     var orderBuyList = List[OrderModel]()
     var orderSellList = List[OrderModel]()

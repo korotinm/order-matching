@@ -15,32 +15,49 @@ import scala.concurrent.Future
   */
 @Singleton
 class LoaderService @Inject()(reader: ResourceReader,
-                              clientT: ClientT,
-                              orderT: OrderT,
                               @Named("directory") dir: String) {
 
   def start(): Future[Terminated] = {
-    // yes, using 'var' is terrible approach but the task was done for fun
-    // and I don't care as it's not prod. version
-    var clientMap = Map.empty[ClientId, ClientModel]
-    var orderBuyList = List[OrderModel]()
-    var orderSellList = List[OrderModel]()
 
-    val clients = reader.read(s"$dir${File.separator}clients.txt")
-    clientT.transform(clients)
-      .foreach(cm => clientMap += (cm.id -> cm))
+    def clientTransformer(iter: Iterator[String]) = {
+      iter.foldLeft(Map.empty[ClientId, ClientModel]) {
+        case (acc, v) =>
+          acc + (v.split("\t") match {
+            case Array(id, amount, a, b, c, d) =>
+              ClientId(id) -> ClientModel(ClientId(id), amount.toInt, a.toInt, b.toInt, c.toInt, d.toInt)
+            case _                             =>
+              throw new RuntimeException(s"Cannot transform file data as Client model(line = $v)")
+          })
 
-    val orders = reader.read(s"$dir${File.separator}orders.txt")
-    orderT.transform(orders)
-      .foreach(om => om.direction match {
-        case Direction.s =>
-          orderSellList = orderSellList :+ om
-        case Direction.b =>
-          orderBuyList = orderBuyList :+ om
-      })
+      }
+    }
 
-    val clientHolderActor = ActorSystem(ClientHolderActor(clientMap, dir), "OrderHolderActor")
-    ActorSystem(OrderHolderActor(clientHolderActor, orderBuyList, orderSellList.toArray), "OrderHolderActor")
+    def orderTransformer(iter: Iterator[String]) = {
+      iter.foldLeft((List.empty[OrderModel], List.empty[OrderModel])) {
+        case ((buyList, sellList), v) =>
+          v.split("\t") match {
+            case Array(clientId, direction, src, count, price) =>
+              val model = OrderModel(ClientId(clientId), Direction.withName(direction), Securities.withName(src), count.toInt, price.toInt)
+              model.direction match {
+                case Direction.s =>
+                  (buyList, sellList :+ model)
+                case Direction.b =>
+                  (buyList :+ model, sellList)
+              }
+            case _                                             =>
+              throw new RuntimeException("Cannot transform file data as Order model")
+          }
+      }
+
+    }
+
+    val clients = reader.read(s"$dir${File.separator}clients.txt", clientTransformer)
+
+    val (bList, sList) = reader.read(s"$dir${File.separator}orders.txt", orderTransformer)
+
+
+    val clientHolderActor = ActorSystem(ClientHolderActor(clients, dir), "OrderHolderActor")
+    ActorSystem(OrderHolderActor(clientHolderActor, bList, sList.toArray), "OrderHolderActor")
 
     clientHolderActor.whenTerminated
   }

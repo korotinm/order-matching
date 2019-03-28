@@ -19,9 +19,9 @@ object OrderHolderActor {
 
   def apply(clientHolder: ActorRef[ClientHolderMessage],
             orderBuyList: List[OrderModel],
-            orderSellArr: Array[OrderModel]): Behavior[OrderHolderMessage] =
+            orderSellMap: Map[Securities, Array[OrderModel]]): Behavior[OrderHolderMessage] =
     Behaviors.setup { context =>
-      val behavior = new OrderHolderActor(clientHolder, orderBuyList, orderSellArr, context)
+      val behavior = new OrderHolderActor(clientHolder, orderBuyList, orderSellMap, context)
 
       context.self ! Next
 
@@ -58,25 +58,47 @@ import wvs.exchange.services.actors.OrderHolderActor._
 
 class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
                        orderBuyList: List[OrderModel],
-                       orderSellArr: Array[OrderModel],
+                       orderSellMap: Map[Securities, Array[OrderModel]],
                        context: ActorContext[OrderHolderMessage]) extends AbstractBehavior[OrderHolderMessage] {
 
   implicit val scheduler: Scheduler = context.system.scheduler
   implicit val timeout: Timeout = 3.seconds
 
   private var buyList = orderBuyList
-  private var sellArr = orderSellArr
+  private var sellMap: Map[Securities, Array[OrderModel]] = orderSellMap
+  private var sellArr: Array[OrderModel] = Array.empty
 
   private var sellIndex = 0
 
   override def onMessage(msg: OrderHolderMessage): Behavior[OrderHolderMessage] = {
 
     def next(): Unit = {
-      if (sellArr.isEmpty)
-        buyList = Nil
-      else if (sellIndex >= sellArr.length) {
+      def nextBuyOrder() = {
         sellIndex = 0
         buyList = buyList.tail
+        next()
+      }
+
+      buyList match {
+        case head :: _ =>
+          sellMap.get(head.src) match {
+            case Some(orders) =>
+              if (sellIndex == 0)
+                sellArr = orders
+
+              else if (sellIndex >= sellArr.length) {
+                nextBuyOrder()
+              }
+
+            case None =>
+              if (sellMap.isEmpty)
+                buyList = Nil
+              else {
+                nextBuyOrder()
+              }
+          }
+
+        case Nil =>
       }
     }
 
@@ -100,12 +122,11 @@ class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
         this
 
       case ResponseClients(mbBuyerActor, mbSellerActor) =>
+        val buyOrder = buyList.head
+        val sellOrder = sellArr(sellIndex)
+
         (mbBuyerActor, mbSellerActor) match {
           case (Some(buyerActor), Some(sellerActor)) =>
-
-            val buyOrder = buyList.head
-            val sellOrder = sellArr(sellIndex)
-
             val minCount =
               if (buyOrder.count > sellOrder.count) sellOrder.count
               else buyOrder.count
@@ -146,6 +167,7 @@ class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
               s"""Error happened during in processing ResponseClient:
                     seller ActorRef is empty (client id = '${sellArr(sellIndex).clientId}')""")
             sellArr = delCurrentSellOrder()
+            modifySellMap(sellOrder.src, sellArr)
             context.self ! Next
 
           case (None, None) =>
@@ -155,6 +177,7 @@ class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
                     (buyer client id = '${buyList.head.clientId}'; seller client id = '${sellArr(sellIndex).clientId}')""")
             buyList = buyList.tail
             sellArr = delCurrentSellOrder()
+            modifySellMap(sellOrder.src, sellArr)
             context.self ! Next
         }
 
@@ -166,15 +189,18 @@ class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
 
         if (buyOrder.count > sellOrder.count) {
           sellArr = delCurrentSellOrder()
+          modifySellMap(sellOrder.src, sellArr)
           buyList = buyList.head.copy(count = buyOrder.count - sellOrder.count) :: buyList.tail
 
         } else if (buyOrder.count == sellOrder.count) {
           sellArr = delCurrentSellOrder()
+          modifySellMap(sellOrder.src, sellArr)
           buyList = buyList.tail
           sellIndex = 0
 
         } else {
           sellArr.update(sellIndex, sellOrder.copy(count = sellOrder.count - buyOrder.count))
+          modifySellMap(sellOrder.src, sellArr)
           buyList = buyList.tail
           sellIndex = 0
         }
@@ -199,4 +225,14 @@ class OrderHolderActor(clientHolder: ActorRef[ClientHolderMessage],
 
   private def delCurrentSellOrder(): Array[OrderModel] =
     sellArr.take(sellIndex) ++ sellArr.takeRight(sellArr.length - sellIndex - 1)
+
+  private def modifySellMap(src: Securities, orders: Array[OrderModel]) =
+    sellArr match {
+      case Array(_, _*) =>
+        sellMap = sellMap.updated(src, orders)
+      case _            =>
+        sellMap = sellMap - src
+    }
+
+
 }

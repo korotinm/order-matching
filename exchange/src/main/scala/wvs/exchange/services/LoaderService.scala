@@ -8,14 +8,10 @@ import akka.actor.typed.{ActorSystem, Terminated}
 import wvs.exchange.services.actors.{ClientHolderActor, OrderHolderActor}
 
 import scala.concurrent.Future
+import scala.io.Source
 
-/**
-  *
-  * This is ugly class just for loading data
-  */
 @Singleton
-class LoaderService @Inject()(reader: ResourceReader,
-                              @Named("directory") dir: String) {
+class LoaderService @Inject()(@Named("directory") dir: String) {
 
   def start(): Future[Terminated] = {
 
@@ -28,38 +24,38 @@ class LoaderService @Inject()(reader: ResourceReader,
             case _                             =>
               throw new RuntimeException(s"Cannot transform file data as Client model(line = $v)")
           })
-
       }
     }
 
-    def orderTransformer(iter: Iterator[String]) = {
-      iter.foldLeft((List.empty[OrderModel], List.empty[OrderModel])) {
-        case ((buyList, sellList), v) =>
+    def orderTransformer(iter: Iterator[String]): (List[OrderModel], Map[Securities, Array[OrderModel]]) = {
+      iter.foldLeft((List.empty[OrderModel], Map.empty[Securities, Array[OrderModel]])) {
+        case ((buyList, sellMap), v) =>
           v.split("\t") match {
             case Array(clientId, direction, src, count, price) =>
               val model = OrderModel(ClientId(clientId), Direction.withName(direction), Securities.withName(src), count.toInt, price.toInt)
               model.direction match {
                 case Direction.s =>
-                  (buyList, sellList :+ model)
+                  val arr = sellMap.getOrElse(model.src, Array.empty[OrderModel])
+                  (buyList, sellMap + (model.src -> (arr :+ model)))
                 case Direction.b =>
-                  (buyList :+ model, sellList)
+                  (buyList :+ model, sellMap)
               }
             case _                                             =>
               throw new RuntimeException("Cannot transform file data as Order model")
           }
       }
-
     }
 
-    val clients = reader.read(s"$dir${File.separator}clients.txt", clientTransformer)
-
-    val (bList, sList) = reader.read(s"$dir${File.separator}orders.txt", orderTransformer)
-
+    val clients = read(s"$dir${File.separator}clients.txt", clientTransformer)
+    val (bList, sMap) = read(s"$dir${File.separator}orders.txt", orderTransformer)
 
     val clientHolderActor = ActorSystem(ClientHolderActor(clients, dir), "OrderHolderActor")
-    ActorSystem(OrderHolderActor(clientHolderActor, bList, sList.toArray), "OrderHolderActor")
+    ActorSystem(OrderHolderActor(clientHolderActor, bList, sMap), "OrderHolderActor")
 
     clientHolderActor.whenTerminated
   }
+
+  private def read[B](source: String, transformer: Iterator[String] => B): B =
+    transformer(Source.fromURL(getClass.getResource(source)).getLines())
 
 }

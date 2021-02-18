@@ -1,4 +1,4 @@
-## The main purpose of this implementation is to work with "Akka Typed"
+## The main purpose of this implementation is working with "Akka Typed"
 
 # Описание задачи
 
